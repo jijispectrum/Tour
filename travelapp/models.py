@@ -70,3 +70,23 @@ class Favorite(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.destination.name}"
+from django.db import models
+from django.contrib.auth.models import User
+
+class SearchHistory(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)  # Anonymous users can search too
+    query = models.CharField(max_length=255)
+    search_count = models.PositiveIntegerField(default=1)
+    last_searched = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.query} - {self.search_count} times"
+class Review(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    destination = models.ForeignKey(Destination, on_delete=models.CASCADE, related_name="reviews")
+    rating = models.PositiveIntegerField(default=1)  # Rating from 1 to 5
+    comment = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} rated {self.destination.name} ({self.rating}/5)"

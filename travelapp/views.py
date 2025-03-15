@@ -13,8 +13,8 @@ from django.contrib.auth.decorators import login_required
 def about(request):
     return render(request,'about.html')
 
-def fyp(request):
-    return render(request,'fyp.html')
+# def fyp(request):
+#     return render(request,'fyp.html')
 
 def service(request):
     return render(request,'service.html')
@@ -177,50 +177,50 @@ def search_destinations(request):
 
 
 
-from django.shortcuts import render
-from .models import Destination
+# from django.shortcuts import render
+# from .models import Destination
 
-
-def filter_destinations(request):
-    destinations = None  # Initially no results
+# @login_required(login_url='login_view')
+# def filter_destinations(request):
+#     destinations = None  # Initially no results
 
  
-    tour_type = request.GET.get('tour_type')
-    accommodation_type = request.GET.get('accommodation_type')
-    state = request.GET.get('state')
-    min_price = request.GET.get('min_price')
-    max_price = request.GET.get('max_price')
-    max_days = request.GET.get('max_days') 
-    interest = request.GET.get('interest')
-    min_distance = request.GET.get('min_distance')
-    max_distance = request.GET.get('max_distance')
+#     tour_type = request.GET.get('tour_type')
+#     accommodation_type = request.GET.get('accommodation_type')
+#     state = request.GET.get('state')
+#     min_price = request.GET.get('min_price')
+#     max_price = request.GET.get('max_price')
+#     max_days = request.GET.get('max_days') 
+#     interest = request.GET.get('interest')
+#     min_distance = request.GET.get('min_distance')
+#     max_distance = request.GET.get('max_distance')
 
-    if any([tour_type, accommodation_type, state, min_price, max_price, max_days, interest, min_distance, max_distance]):
-        destinations = Destination.objects.all()
+#     if any([tour_type, accommodation_type, state, min_price, max_price, max_days, interest, min_distance, max_distance]):
+#         destinations = Destination.objects.all()
 
-        # Apply filters
-        if tour_type:
-            destinations = destinations.filter(tour_type=tour_type)
+#         # Apply filters
+#         if tour_type:
+#             destinations = destinations.filter(tour_type=tour_type)
 
-        if accommodation_type:
-            destinations = destinations.filter(accommodation_type=accommodation_type)
+#         if accommodation_type:
+#             destinations = destinations.filter(accommodation_type=accommodation_type)
 
-        if state:
-            destinations = destinations.filter(state__icontains=state)
+#         if state:
+#             destinations = destinations.filter(state__icontains=state)
 
-        if min_price and max_price:
-            destinations = destinations.filter(price__gte=min_price, price__lte=max_price)
+#         if min_price and max_price:
+#             destinations = destinations.filter(price__gte=min_price, price__lte=max_price)
 
-        if max_days:
-            destinations = destinations.filter(duration__lte=max_days)
+#         if max_days:
+#             destinations = destinations.filter(duration__lte=max_days)
 
-        if interest:
-            destinations = destinations.filter(interest__icontains=interest)
+#         if interest:
+#             destinations = destinations.filter(interest__icontains=interest)
 
-        if min_distance and max_distance:
-            destinations = destinations.filter(distance__gte=min_distance, distance__lte=max_distance)
+#         if min_distance and max_distance:
+#             destinations = destinations.filter(distance__gte=min_distance, distance__lte=max_distance)
 
-    return render(request, 'recomendations.html', {'destinations': destinations})
+#     return render(request, 'recomendations.html', {'destinations': destinations})
 
 # from django.shortcuts import render
 # from .models import contact
@@ -269,17 +269,19 @@ def contact_view(request):
 from django.shortcuts import render
 from .models import Destination
 
-def personalized_recommendations(request):
-    user_interest = request.GET.get('interest', None)
+# def personalized_recommendations(request):
+#     user_interest = request.GET.get('interest', None)
 
-    # Start with all destinations
-    destinations = Destination.objects.all()
+#     # Start with all destinations
+#     destinations = Destination.objects.all()
 
-    # Apply filtering only if interest is provided
-    if user_interest:
-        destinations = destinations.filter(interest__icontains=user_interest)
+#     # Apply filtering only if interest is provided
+#     if user_interest:
+#         destinations = destinations.filter(interest__icontains=user_interest)
 
-    return render(request, 'test.html', {'destinations': destinations})
+#     return render(request, 'test.html', {'destinations': destinations})
+
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 
@@ -321,3 +323,102 @@ def remove_favorite(request, destination_id):
     Favorite.objects.filter(user=request.user, destination=destination).delete()
     messages.info(request, f'Removed {destination.name} from favorites.')
     return redirect('view_favorites')
+import pandas as pd
+import numpy as np
+from django.shortcuts import render
+from django.db.models import Sum
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from .models import Destination,  Favorite
+from django.core.exceptions import ValidationError
+
+
+def personalized_recommendations(request):
+    user = request.user if request.user.is_authenticated else None  # Check if the user is logged in
+
+    # Fetch user's favorite destinations
+    favorite_destinations = Favorite.objects.filter(user=user).values_list('destination__id', flat=True)
+
+    # Fetch all destinations
+    destinations = Destination.objects.all()
+    
+    if not destinations.exists():
+        return render(request, 'test.html', {'destinations': []})  # If no destinations exist
+
+    # Create a DataFrame of destinations
+    data = pd.DataFrame(list(destinations.values('id', 'name', 'location', 'tour_type', 'interest', 'description')))
+
+    # Fill NaN values
+    data.fillna("", inplace=True)
+
+    # Combine all text features to create a "content" column
+    data["content"] = (
+        data["name"] + " " + data["location"] + " " + data["tour_type"] + " " + data["interest"] + " " + data["description"]
+    )
+
+    # TF-IDF Vectorization
+    vectorizer = TfidfVectorizer(stop_words="english")
+    tfidf_matrix = vectorizer.fit_transform(data["content"])
+
+    recommended_ids = set()
+
+    # **Find Similar Destinations Based on User's Favorites**
+    if favorite_destinations:
+        fav_vectors = tfidf_matrix[data.index[data["id"].isin(favorite_destinations)]]
+        similarity_scores = cosine_similarity(fav_vectors, tfidf_matrix).mean(axis=0)
+        top_indices = similarity_scores.argsort()[-5:][::-1]  # Get top 5 matches
+        recommended_ids.update(data.iloc[top_indices]["id"].tolist())
+
+    # Get final recommended destinations
+    recommended_destinations = Destination.objects.filter(id__in=recommended_ids)[:5]
+
+    return render(request, 'fyp.html', {'destinations': recommended_destinations})
+from django.db.models import Avg
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+from .models import Destination
+
+@login_required(login_url='login_view')
+def filter_destinations(request):
+    destinations = None  # Initially no results
+
+    # Get filter options from request
+    tour_type = request.GET.get('tour_type')
+    accommodation_type = request.GET.get('accommodation_type')
+    state = request.GET.get('state')
+    min_price = request.GET.get('min_price')
+    max_price = request.GET.get('max_price')
+    max_days = request.GET.get('max_days') 
+    interest = request.GET.get('interest')
+    min_distance = request.GET.get('min_distance')
+    max_distance = request.GET.get('max_distance')
+
+    if any([tour_type, accommodation_type, state, min_price, max_price, max_days, interest, min_distance, max_distance]):
+        destinations = Destination.objects.all()
+
+        # Apply filters
+        if tour_type:
+            destinations = destinations.filter(tour_type=tour_type)
+
+        if accommodation_type:
+            destinations = destinations.filter(accommodation_type=accommodation_type)
+
+        if state:
+            destinations = destinations.filter(state__icontains=state)
+
+        if min_price and max_price:
+            destinations = destinations.filter(price__gte=min_price, price__lte=max_price)
+
+        if max_days:
+            destinations = destinations.filter(duration__lte=max_days)
+
+        if interest:
+            destinations = destinations.filter(interest__icontains=interest)
+
+        if min_distance and max_distance:
+            destinations = destinations.filter(distance__gte=min_distance, distance__lte=max_distance)
+
+        
+
+    return render(request, 'recomendations.html', {'destinations': destinations})
+
